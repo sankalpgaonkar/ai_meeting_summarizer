@@ -4,9 +4,9 @@
   "description": "AI Meeting Summarizer - Real-time audio capture and video analysis with Gemini integration",
   "main": "app.py",
   "scripts": {
-    "start": "python run.py",
-    "dev": "python run.py --debug",
-    "test": "python -m pytest tests/ -v",
+    "start": "python3 run.py",
+    "dev": "python3 run.py --debug",
+    "test": "python3 -m pytest tests/ -v",
     "build": "echo \"Application ready for deployment\""
   },
   "author": "",
