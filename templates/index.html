@@ -1,0 +1,668 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI Meeting Summarizer</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    fontFamily: {
+                        sans: ['Inter', 'system-ui', '-apple-system', 'sans-serif'],
+                    }
+                }
+            }
+        }
+    </script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+    <style>
+        * { font-family: 'Inter', system-ui, -apple-system, sans-serif; }
+        .d-flex { display: flex; }
+        .d-flex-col { flex-direction: column; }
+        .align-center { align-items: center; }
+        .justify-center { justify-content: center; }
+        .justify-between { justify-content: space-between; }
+        .flex-wrap { flex-wrap: wrap; }
+        .flex-1 { flex: 1; }
+        .gap-2 { gap: 0.5rem; }
+        .gap-3 { gap: 0.75rem; }
+        .gap-4 { gap: 1rem; }
+        .gap-6 { gap: 1.5rem; }
+        .p-2 { padding: 0.5rem; }
+        .p-3 { padding: 0.75rem; }
+        .p-4 { padding: 1rem; }
+        .p-6 { padding: 1.5rem; }
+        .p-8 { padding: 2rem; }
+        .m-0 { margin: 0; }
+        .mt-2 { margin-top: 0.5rem; }
+        .mt-4 { margin-top: 1rem; }
+        .mt-6 { margin-top: 1.5rem; }
+        .mb-2 { margin-bottom: 0.5rem; }
+        .mb-4 { margin-bottom: 1rem; }
+        .mb-6 { margin-bottom: 1.5rem; }
+        .text-sm { font-size: 0.875rem; }
+        .text-xs { font-size: 0.75rem; }
+        .text-lg { font-size: 1.125rem; }
+        .text-xl { font-size: 1.25rem; }
+        .text-2xl { font-size: 1.5rem; }
+        .text-3xl { font-size: 1.875rem; }
+        .font-medium { font-weight: 500; }
+        .font-semibold { font-weight: 600; }
+        .font-bold { font-weight: 700; }
+        .rounded-sm { border-radius: 0.25rem; }
+        .rounded { border-radius: 0.375rem; }
+        .rounded-lg { border-radius: 0.5rem; }
+        .rounded-xl { border-radius: 0.75rem; }
+        .rounded-2xl { border-radius: 1rem; }
+        .rounded-full { border-radius: 9999px; }
+        .shadow-sm { box-shadow: 0 1px 2px rgba(0,0,0,0.05); }
+        .shadow { box-shadow: 0 1px 3px rgba(0,0,0,0.1), 0 1px 2px rgba(0,0,0,0.06); }
+        .shadow-lg { box-shadow: 0 10px 15px -3px rgba(0,0,0,0.1), 0 4px 6px -2px rgba(0,0,0,0.05); }
+        .shadow-xl { box-shadow: 0 20px 25px -5px rgba(0,0,0,0.1), 0 10px 10px -5px rgba(0,0,0,0.04); }
+        .w-full { width: 100%; }
+        .max-w-3xl { max-width: 48rem; }
+        .max-w-5xl { max-width: 64rem; }
+        .max-w-6xl { max-width: 72rem; }
+        .mx-auto { margin-left: auto; margin-right: auto; }
+        .overflow-hidden { overflow: hidden; }
+        .overflow-auto { overflow: auto; }
+        .overflow-y-auto { overflow-y: auto; }
+        .cursor-pointer { cursor: pointer; }
+        .cursor-not-allowed { cursor: not-allowed; }
+        .transition { transition: all 0.2s; }
+        .transition-fast { transition: all 0.15s; }
+        .volume-bar { transition: width 0.1s ease-out, background-color 0.1s; height: 6px; border-radius: 3px; }
+        .pulse-recording { animation: pulse-ring 1.5s cubic-bezier(0.4, 0, 0.6, 1) infinite; }
+        @keyframes pulse-ring { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
+        .toast-enter { animation: toastIn 0.3s ease-out; }
+        @keyframes toastIn { from { transform: translateY(-20px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
+        .toast-exit { animation: toastOut 0.3s ease-in forwards; }
+        @keyframes toastOut { to { transform: translateY(-20px); opacity: 0; } }
+        .scrollbar-thin::-webkit-scrollbar { width: 6px; }
+        .scrollbar-thin::-webkit-scrollbar-track { background: #f1f5f9; border-radius: 3px; }
+        .scrollbar-thin::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 3px; }
+        .scrollbar-thin::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
+        .card-hover { transition: transform 0.2s, box-shadow 0.2s; }
+        .card-hover:hover { transform: translateY(-2px); box-shadow: 0 10px 25px -5px rgba(0,0,0,0.1); }
+    </style>
+</head>
+<body class="bg-gradient-to-br from-slate-50 to-blue-50 min-h-screen">
+    <div id="toast-container" class="fixed top-4 right-4 z-50 d-flex d-flex-col gap-2" style="pointer-events:none"></div>
+
+    <header class="bg-white/80 backdrop-blur-md border-b border-slate-200 sticky top-0 z-40">
+        <div class="max-w-6xl mx-auto px-4 py-4 d-flex justify-between align-center">
+            <div class="d-flex align-center gap-3">
+                <div class="w-10 h-10 rounded-xl bg-gradient-to-br from-blue-600 to-indigo-600 d-flex align-center justify-center shadow-lg">
+                    <svg class="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z"/>
+                    </svg>
+                </div>
+                <div>
+                    <h1 class="text-xl font-bold text-slate-800">AI Meeting Summarizer</h1>
+                    <p class="text-xs text-slate-500">Powered by Gemini 2.0 Flash</p>
+                </div>
+            </div>
+            <div class="d-flex align-center gap-3">
+                <div id="connection-status" class="d-flex align-center gap-2 text-sm">
+                    <span class="w-2 h-2 rounded-full bg-slate-300" id="sse-dot"></span>
+                    <span class="text-slate-500" id="sse-label">Connecting...</span>
+                </div>
+                <button onclick="loadMeetings()" class="text-sm text-slate-500 hover:text-slate-700 transition">
+                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
+                    </svg>
+                </button>
+            </div>
+        </div>
+    </header>
+
+    <main class="max-w-6xl mx-auto px-4 py-8">
+        <div id="view-home">
+            <div class="d-flex justify-between align-center mb-6">
+                <h2 class="text-2xl font-bold text-slate-800">Record Meeting</h2>
+            </div>
+
+            <div class="bg-white rounded-2xl shadow-lg p-8 mb-8">
+                <div class="d-flex flex-wrap gap-6">
+                    <div class="flex-1 min-w-72">
+                        <h3 class="text-lg font-semibold text-slate-700 mb-4">Live Recording</h3>
+                        <div class="d-flex align-center gap-3 mb-4">
+                            <input type="text" id="meeting-title" placeholder="Meeting title (optional)" class="flex-1 px-4 py-2 rounded-lg border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent">
+                        </div>
+                        <div id="volume-meter-container" class="mb-4" style="display:none">
+                            <div class="d-flex justify-between align-center mb-2">
+                                <span class="text-xs text-slate-500 font-medium">Audio Level</span>
+                                <span class="text-xs text-slate-400" id="volume-value">0%</span>
+                            </div>
+                            <div class="bg-slate-100 rounded-full h-2 overflow-hidden">
+                                <div id="volume-bar" class="volume-bar bg-green-500" style="width:0%"></div>
+                            </div>
+                        </div>
+                        <div class="d-flex align-center gap-3">
+                            <button id="btn-start" onclick="startRecording()" class="bg-emerald-500 hover:bg-emerald-600 active:bg-emerald-700 text-white font-semibold py-3 px-8 rounded-xl transition shadow-lg shadow-emerald-500/25 d-flex align-center gap-2">
+                                <svg class="w-5 h-5" fill="currentColor" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
+                                Start Capture
+                            </button>
+                            <button id="btn-stop" onclick="stopRecording()" disabled class="bg-red-500 hover:bg-red-600 active:bg-red-700 text-white font-semibold py-3 px-8 rounded-xl transition shadow-lg shadow-red-500/25 d-flex align-center gap-2 cursor-not-allowed" style="opacity:0.5">
+                                <svg class="w-5 h-5" fill="currentColor" viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12" rx="2"/></svg>
+                                Stop & Analyze
+                            </button>
+                        </div>
+                        <div id="recording-info" class="mt-4 d-flex align-center gap-2 text-sm text-slate-500" style="display:none">
+                            <span class="w-3 h-3 rounded-full bg-red-500 pulse-recording"></span>
+                            <span id="recording-timer">00:00</span>
+                            <span class="text-slate-300">|</span>
+                            <span id="chunk-count" class="text-slate-400">0 chunks</span>
+                        </div>
+                        <div class="mt-4">
+                            <button onclick="testMicrophone()" class="text-sm text-blue-600 hover:text-blue-700 font-medium transition">
+                                Test Microphone →
+                            </button>
+                        </div>
+                    </div>
+
+                    <div class="w-px bg-slate-200 hidden md:block" style="min-height:200px"></div>
+
+                    <div class="flex-1 min-w-72">
+                        <h3 class="text-lg font-semibold text-slate-700 mb-4">Video Upload</h3>
+                        <form id="video-form" onsubmit="uploadVideo(event)" class="d-flex d-flex-col gap-3">
+                            <input type="text" name="title" placeholder="Video title (optional)" class="w-full px-4 py-2 rounded-lg border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+                            <div class="border-2 border-dashed border-slate-200 rounded-xl p-6 text-center transition hover:border-blue-400 hover:bg-blue-50/50 cursor-pointer" id="video-dropzone" onclick="document.getElementById('video-input').click()">
+                                <input type="file" id="video-input" name="video" accept="video/mp4,video/webm,video/quicktime,video/x-msvideo" class="hidden" onchange="handleVideoSelect(this)">
+                                <svg class="w-10 h-10 mx-auto text-slate-300 mb-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"/>
+                                </svg>
+                                <p class="text-sm text-slate-500 font-medium" id="video-label">Drop video here or click to browse</p>
+                                <p class="text-xs text-slate-400 mt-1" id="video-size">MP4, WebM, MOV up to {{max_video_mb}}MB</p>
+                            </div>
+                            <div id="video-preview" class="hidden">
+                                <div class="d-flex align-center gap-2 p-2 bg-slate-50 rounded-lg">
+                                    <svg class="w-4 h-4 text-slate-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+                                    <span class="text-sm text-slate-600 flex-1 truncate" id="video-filename"></span>
+                                    <button type="button" onclick="clearVideo()" class="text-slate-400 hover:text-red-500 transition">
+                                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+                                    </button>
+                                </div>
+                            </div>
+                            <button type="submit" id="btn-upload" class="bg-blue-600 hover:bg-blue-700 active:bg-blue-800 text-white font-semibold py-3 px-8 rounded-xl transition shadow-lg shadow-blue-500/25 d-flex align-center justify-center gap-2" style="display:none">
+                                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"/></svg>
+                                Analyze Video
+                            </button>
+                        </form>
+                    </div>
+                </div>
+            </div>
+
+            <div id="live-transcript-section" class="bg-white rounded-2xl shadow-lg p-6 mb-8" style="display:none">
+                <div class="d-flex justify-between align-center mb-4">
+                    <h3 class="text-lg font-semibold text-slate-700">Live Transcript</h3>
+                    <span class="text-xs text-slate-400">Updates in real-time</span>
+                </div>
+                <div id="live-transcript" class="bg-slate-50 rounded-xl p-4 h-48 overflow-y-auto scrollbar-thin text-sm text-slate-600 leading-relaxed">
+                    <span class="text-slate-400 italic">Waiting for speech...</span>
+                </div>
+            </div>
+
+            <div id="processing-section" class="bg-white rounded-2xl shadow-lg p-8 mb-8" style="display:none">
+                <div class="d-flex d-flex-col align-center justify-center gap-4 text-center">
+                    <div class="relative">
+                        <svg class="w-16 h-16 animate-spin text-blue-500" fill="none" viewBox="0 0 24 24">
+                            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                        </svg>
+                    </div>
+                    <div>
+                        <h3 class="text-lg font-semibold text-slate-700" id="processing-title">Processing Meeting</h3>
+                        <p class="text-sm text-slate-500 mt-1" id="processing-status">Transcribing audio...</p>
+                    </div>
+                    <div class="w-full max-w-sm">
+                        <div class="bg-slate-100 rounded-full h-2 overflow-hidden">
+                            <div id="processing-bar" class="bg-blue-500 h-full rounded-full transition-all" style="width:0%"></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="d-flex justify-between align-center mb-4 mt-8">
+                <h2 class="text-xl font-bold text-slate-800">Meeting History</h2>
+                <span class="text-sm text-slate-500" id="meetings-count"></span>
+            </div>
+
+            <div id="meetings-list" class="d-flex d-flex-col gap-4">
+                <div class="text-center py-12 text-slate-400">
+                    <svg class="w-12 h-12 mx-auto mb-3 opacity-50" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/></svg>
+                    <p class="text-sm">No meetings yet. Start recording!</p>
+                </div>
+            </div>
+        </div>
+
+        <div id="view-detail" style="display:none">
+            <button onclick="showHome()" class="d-flex align-center gap-2 text-sm text-slate-500 hover:text-slate-700 mb-4 transition">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 19l-7-7m0 0l7-7m-7 7h18"/></svg>
+                Back to Home
+            </button>
+
+            <div id="detail-content"></div>
+        </div>
+    </main>
+
+    <footer class="border-t border-slate-200 bg-white/50 mt-12 py-6">
+        <div class="max-w-6xl mx-auto px-4 text-center text-xs text-slate-400">
+            AI Meeting Summarizer &middot; Powered by Gemini 2.0 Flash + Whisper &middot; Built with Flask
+        </div>
+    </footer>
+
+    <script>
+        const state = {
+            recording: false,
+            meetingId: null,
+            startTime: null,
+            timerInterval: null,
+            volumeInterval: null,
+            eventsource: null,
+            currentView: 'home',
+        };
+
+        document.addEventListener('DOMContentLoaded', () => {
+            loadMeetings();
+            connectSSE();
+            document.getElementById('video-input').addEventListener('change', (e) => handleVideoSelect(e.target));
+            const dropzone = document.getElementById('video-dropzone');
+            dropzone.addEventListener('dragover', (e) => { e.preventDefault(); dropzone.classList.add('border-blue-400', 'bg-blue-50'); });
+            dropzone.addEventListener('dragleave', () => dropzone.classList.remove('border-blue-400', 'bg-blue-50'));
+            dropzone.addEventListener('drop', (e) => {
+                e.preventDefault();
+                dropzone.classList.remove('border-blue-400', 'bg-blue-50');
+                const file = e.dataTransfer.files[0];
+                if (file) { document.getElementById('video-input').files = e.dataTransfer.files; handleVideoSelect(document.getElementById('video-input')); }
+            });
+        });
+
+        function connectSSE() {
+            if (state.eventsource) state.eventsource.close();
+            const es = new EventSource('/api/stream');
+            state.eventsource = es;
+            es.addEventListener('open', () => {
+                document.getElementById('sse-dot').className = 'w-2 h-2 rounded-full bg-green-500';
+                document.getElementById('sse-label').textContent = 'Live';
+            });
+            es.addEventListener('error', () => {
+                document.getElementById('sse-dot').className = 'w-2 h-2 rounded-full bg-red-500';
+                document.getElementById('sse-label').textContent = 'Reconnecting...';
+                setTimeout(connectSSE, 3000);
+            });
+            es.addEventListener('recording_started', (e) => {
+                const data = JSON.parse(e.data);
+                state.meetingId = data.meeting_id;
+                toast('Recording started', 'info');
+            });
+            es.addEventListener('partial_transcript', (e) => {
+                const data = JSON.parse(e.data);
+                const el = document.getElementById('live-transcript');
+                if (el) {
+                    el.innerHTML = data.text ? `<p>${escapeHtml(data.text)}</p>` : '<span class="text-slate-400 italic">Listening...</span>';
+                    el.scrollTop = el.scrollHeight;
+                }
+            });
+            es.addEventListener('processing_started', (e) => {
+                const data = JSON.parse(e.data);
+                showProcessing('Processing Meeting', 'Initializing analysis...');
+                document.getElementById('live-transcript-section').style.display = 'none';
+            });
+            es.addEventListener('transcription_started', (e) => {
+                updateProcessing('Transcribing audio...', 20);
+            });
+            es.addEventListener('transcription_complete', (e) => {
+                updateProcessing('Analyzing content with Gemini...', 50);
+            });
+            es.addEventListener('analysis_started', (e) => {
+                updateProcessing('Generating Minutes of Meeting...', 70);
+            });
+            es.addEventListener('processing_complete', (e) => {
+                const data = JSON.parse(e.data);
+                updateProcessing('Done!', 100);
+                setTimeout(() => { hideProcessing(); loadMeetings(); if (data.meeting_id) showMeetingDetail(data.meeting_id); }, 1500);
+            });
+            es.addEventListener('processing_error', (e) => {
+                const data = JSON.parse(e.data);
+                hideProcessing();
+                toast('Processing failed: ' + data.error, 'error');
+            });
+            es.onmessage = (e) => {
+                if (!e.data || e.data === ': keepalive') return;
+            };
+        }
+
+        function loadMeetings(page = 1) {
+            fetch(`/api/meetings?page=${page}`)
+                .then(r => r.json())
+                .then(data => renderMeetings(data.meetings, data.total))
+                .catch(() => toast('Failed to load meetings', 'error'));
+        }
+
+        function renderMeetings(meetings, total) {
+            document.getElementById('meetings-count').textContent = total ? `${total} total` : '';
+            const el = document.getElementById('meetings-list');
+            if (!meetings || meetings.length === 0) {
+                el.innerHTML = `<div class="text-center py-12 text-slate-400">
+                    <svg class="w-12 h-12 mx-auto mb-3 opacity-50" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/></svg>
+                    <p class="text-sm">No meetings yet. Start recording!</p></div>`;
+                return;
+            }
+            el.innerHTML = meetings.map(m => {
+                const sentimentColor = {'positive': 'bg-emerald-100 text-emerald-700', 'negative': 'bg-red-100 text-red-700', 'neutral': 'bg-slate-100 text-slate-600'};
+                const statusBadge = {
+                    'complete': '<span class="bg-emerald-100 text-emerald-700 text-xs px-2 py-0.5 rounded-full font-medium">Complete</span>',
+                    'processing': '<span class="bg-blue-100 text-blue-700 text-xs px-2 py-0.5 rounded-full font-medium">Processing</span>',
+                    'error': '<span class="bg-red-100 text-red-700 text-xs px-2 py-0.5 rounded-full font-medium">Error</span>',
+                    'pending': '<span class="bg-amber-100 text-amber-700 text-xs px-2 py-0.5 rounded-full font-medium">Pending</span>',
+                    'recording': '<span class="bg-red-100 text-red-700 text-xs px-2 py-0.5 rounded-full font-medium d-flex align-center gap-1"><span class="w-1.5 h-1.5 rounded-full bg-red-500 pulse-recording"></span>Recording</span>',
+                };
+                const date = new Date(m.created_at).toLocaleDateString('en-US', {month:'short', day:'numeric', year:'numeric', hour:'2-digit', minute:'2-digit'});
+                const actionCount = (m.action_items || []).length;
+                return `<div class="bg-white rounded-xl shadow-sm p-5 card-hover cursor-pointer border border-slate-100" onclick="showMeetingDetail('${m.id}')">
+                    <div class="d-flex justify-between align-center mb-2">
+                        <h4 class="font-semibold text-slate-800 truncate flex-1">${escapeHtml(m.title)}</h4>
+                        ${statusBadge[m.status] || statusBadge['pending']}
+                    </div>
+                    <p class="text-sm text-slate-500 mb-3 line-clamp-2">${m.summary ? escapeHtml(m.summary) : (m.transcript ? escapeHtml(m.transcript.substring(0, 150)) + '...' : 'No content yet')}</p>
+                    <div class="d-flex justify-between align-center text-xs text-slate-400">
+                        <span>${date}</span>
+                        <div class="d-flex align-center gap-3">
+                            ${m.duration_seconds ? `<span>${formatDuration(m.duration_seconds)}</span>` : ''}
+                            ${m.source === 'video' ? '<span class="d-flex align-center gap-1"><svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z"/></svg>Video</span>' : ''}
+                            ${actionCount ? `<span>${actionCount} action items</span>` : ''}
+                            ${m.sentiment ? `<span class="${sentimentColor[m.sentiment] || sentimentColor.neutral} text-xs px-1.5 py-0.5 rounded font-medium">${m.sentiment}</span>` : ''}
+                        </div>
+                    </div>
+                </div>`;
+            }).join('');
+        }
+
+        function showMeetingDetail(id) {
+            fetch(`/api/meetings/${id}`)
+                .then(r => r.json())
+                .then(m => {
+                    state.currentView = 'detail';
+                    document.getElementById('view-home').style.display = 'none';
+                    document.getElementById('view-detail').style.display = 'block';
+                    const sentimentColors = {'positive': 'bg-emerald-100 text-emerald-700', 'negative': 'bg-red-100 text-red-700', 'neutral': 'bg-slate-100 text-slate-600'};
+                    document.getElementById('detail-content').innerHTML = `
+                        <div class="bg-white rounded-2xl shadow-lg overflow-hidden">
+                            <div class="bg-gradient-to-r from-blue-600 to-indigo-600 p-6 text-white">
+                                <div class="d-flex justify-between align-center">
+                                    <div>
+                                        <h2 class="text-2xl font-bold">${escapeHtml(m.title)}</h2>
+                                        <p class="text-blue-200 text-sm mt-1">${new Date(m.created_at).toLocaleDateString('en-US', {weekday:'long', year:'numeric', month:'long', day:'numeric', hour:'2-digit', minute:'2-digit'})}</p>
+                                    </div>
+                                    <div class="d-flex gap-2">
+                                        <a href="/api/export/${m.id}" class="bg-white/20 hover:bg-white/30 text-white text-sm font-medium py-2 px-4 rounded-lg transition">Export MD</a>
+                                        <button onclick="deleteMeeting('${m.id}')" class="bg-white/20 hover:bg-white/30 text-white text-sm font-medium py-2 px-4 rounded-lg transition">Delete</button>
+                                    </div>
+                                </div>
+                                <div class="d-flex gap-4 mt-4">
+                                    ${m.duration_seconds ? `<span class="text-sm text-blue-200">Duration: ${formatDuration(m.duration_seconds)}</span>` : ''}
+                                    <span class="text-sm text-blue-200">Source: ${m.source}</span>
+                                    ${m.sentiment ? `<span class="${sentimentColors[m.sentiment]} text-xs px-2 py-0.5 rounded-full font-medium">${m.sentiment}</span>` : ''}
+                                </div>
+                            </div>
+                            <div class="p-6">
+                                ${m.summary ? `<div class="mb-6">
+                                    <h3 class="text-lg font-semibold text-slate-700 mb-2">Summary</h3>
+                                    <p class="text-slate-600 leading-relaxed">${escapeHtml(m.summary)}</p>
+                                </div>` : ''}
+                                ${m.key_points && m.key_points.length ? `<div class="mb-6">
+                                    <h3 class="text-lg font-semibold text-slate-700 mb-2">Key Points</h3>
+                                    <ul class="space-y-1">${m.key_points.map(p => `<li class="text-slate-600 text-sm d-flex gap-2"><span class="text-blue-500 mt-1 shrink-0">•</span>${escapeHtml(p)}</li>`).join('')}</ul>
+                                </div>` : ''}
+                                ${m.action_items && m.action_items.length ? `<div class="mb-6">
+                                    <h3 class="text-lg font-semibold text-slate-700 mb-2">Action Items</h3>
+                                    <div class="space-y-2">${m.action_items.map(a => `<div class="bg-amber-50 border border-amber-200 rounded-lg p-3">
+                                        <div class="d-flex justify-between align-center">
+                                            <span class="text-slate-700 text-sm font-medium">${escapeHtml(a.task)}</span>
+                                            ${a.owner ? `<span class="text-xs bg-amber-200 text-amber-800 px-2 py-0.5 rounded-full">${escapeHtml(a.owner)}</span>` : ''}
+                                        </div>
+                                        ${a.due ? `<p class="text-xs text-amber-600 mt-1">Due: ${escapeHtml(a.due)}</p>` : ''}
+                                    </div>`).join('')}</div>
+                                </div>` : ''}
+                                ${m.decisions && m.decisions.length ? `<div class="mb-6">
+                                    <h3 class="text-lg font-semibold text-slate-700 mb-2">Decisions</h3>
+                                    <ul class="space-y-1">${m.decisions.map(d => `<li class="text-slate-600 text-sm d-flex gap-2"><span class="text-emerald-500 mt-1 shrink-0">✓</span>${escapeHtml(d)}</li>`).join('')}</ul>
+                                </div>` : ''}
+                                ${m.next_steps && m.next_steps.length ? `<div class="mb-6">
+                                    <h3 class="text-lg font-semibold text-slate-700 mb-2">Next Steps</h3>
+                                    <ul class="space-y-1">${m.next_steps.map(s => `<li class="text-slate-600 text-sm d-flex gap-2"><span class="text-blue-500 mt-1 shrink-0">→</span>${escapeHtml(s)}</li>`).join('')}</ul>
+                                </div>` : ''}
+                                ${m.transcript ? `<div class="mt-6 pt-6 border-t border-slate-200">
+                                    <h3 class="text-lg font-semibold text-slate-700 mb-2">Full Transcript</h3>
+                                    <div class="bg-slate-50 rounded-lg p-4 max-h-96 overflow-y-auto scrollbar-thin">
+                                        <p class="text-sm text-slate-600 leading-relaxed whitespace-pre-wrap">${escapeHtml(m.transcript)}</p>
+                                    </div>
+                                </div>` : ''}
+                            </div>
+                        </div>`;
+                })
+                .catch(() => toast('Failed to load meeting', 'error'));
+        }
+
+        function showHome() {
+            state.currentView = 'home';
+            document.getElementById('view-home').style.display = 'block';
+            document.getElementById('view-detail').style.display = 'none';
+            loadMeetings();
+        }
+
+        function deleteMeeting(id) {
+            if (!confirm('Delete this meeting?')) return;
+            fetch(`/api/meetings/${id}`, {method: 'DELETE'})
+                .then(() => { toast('Meeting deleted', 'success'); showHome(); })
+                .catch(() => toast('Failed to delete', 'error'));
+        }
+
+        function startRecording() {
+            const title = document.getElementById('meeting-title').value;
+            document.getElementById('btn-start').disabled = true;
+            document.getElementById('btn-start').style.opacity = '0.5';
+            fetch('/api/start', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({title: title || undefined}),
+            })
+            .then(r => r.json())
+            .then(data => {
+                if (data.status === 'started') {
+                    state.recording = true;
+                    state.meetingId = data.meeting_id;
+                    state.startTime = Date.now();
+                    document.getElementById('btn-stop').disabled = false;
+                    document.getElementById('btn-stop').style.opacity = '1';
+                    document.getElementById('btn-stop').classList.remove('cursor-not-allowed');
+                    document.getElementById('recording-info').style.display = 'flex';
+                    document.getElementById('volume-meter-container').style.display = 'block';
+                    document.getElementById('live-transcript-section').style.display = 'block';
+                    document.getElementById('live-transcript').innerHTML = '<span class="text-slate-400 italic">Listening for speech...</span>';
+                    startTimer();
+                    startVolumePolling();
+                    toast('Recording started', 'success');
+                } else {
+                    toast('Failed to start: ' + JSON.stringify(data), 'error');
+                    document.getElementById('btn-start').disabled = false;
+                    document.getElementById('btn-start').style.opacity = '1';
+                }
+            })
+            .catch(e => { toast('Failed to start recording', 'error'); document.getElementById('btn-start').disabled = false; document.getElementById('btn-start').style.opacity = '1'; });
+        }
+
+        function stopRecording() {
+            if (!state.recording) return;
+            document.getElementById('btn-stop').disabled = true;
+            document.getElementById('btn-stop').style.opacity = '0.5';
+            fetch('/api/stop', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({meeting_id: state.meetingId}),
+            })
+            .then(r => r.json())
+            .then(data => {
+                state.recording = false;
+                stopTimer();
+                stopVolumePolling();
+                document.getElementById('btn-start').disabled = false;
+                document.getElementById('btn-start').style.opacity = '1';
+                document.getElementById('btn-stop').disabled = true;
+                document.getElementById('btn-stop').style.opacity = '0.5';
+                document.getElementById('btn-stop').classList.add('cursor-not-allowed');
+                document.getElementById('recording-info').style.display = 'none';
+                document.getElementById('volume-meter-container').style.display = 'none';
+                document.getElementById('volume-bar').style.width = '0%';
+                document.getElementById('meeting-title').value = '';
+                toast('Processing meeting...', 'info');
+            })
+            .catch(e => { toast('Failed to stop recording', 'error'); });
+        }
+
+        function startTimer() {
+            stopTimer();
+            state.timerInterval = setInterval(() => {
+                const elapsed = Math.floor((Date.now() - state.startTime) / 1000);
+                document.getElementById('recording-timer').textContent = formatTime(elapsed);
+            }, 1000);
+        }
+
+        function stopTimer() {
+            if (state.timerInterval) { clearInterval(state.timerInterval); state.timerInterval = null; }
+        }
+
+        function startVolumePolling() {
+            stopVolumePolling();
+            state.volumeInterval = setInterval(async () => {
+                try {
+                    const r = await fetch('/api/status');
+                    const data = await r.json();
+                    const vol = data.audio.last_volume || 0;
+                    const pct = Math.min(vol * 300, 100);
+                    const bar = document.getElementById('volume-bar');
+                    bar.style.width = pct + '%';
+                    bar.style.backgroundColor = pct > 70 ? '#ef4444' : pct > 40 ? '#f59e0b' : '#22c55e';
+                    document.getElementById('volume-value').textContent = Math.round(pct) + '%';
+                    document.getElementById('chunk-count').textContent = (data.audio.chunk_count || 0) + ' chunks';
+                } catch (e) {}
+            }, 200);
+        }
+
+        function stopVolumePolling() {
+            if (state.volumeInterval) { clearInterval(state.volumeInterval); state.volumeInterval = null; }
+        }
+
+        function handleVideoSelect(input) {
+            const file = input.files[0];
+            if (!file) return;
+            document.getElementById('video-label').textContent = file.name;
+            document.getElementById('video-preview').classList.remove('hidden');
+            document.getElementById('video-filename').textContent = file.name;
+            document.getElementById('btn-upload').style.display = 'flex';
+        }
+
+        function clearVideo() {
+            document.getElementById('video-input').value = '';
+            document.getElementById('video-label').textContent = 'Drop video here or click to browse';
+            document.getElementById('video-preview').classList.add('hidden');
+            document.getElementById('btn-upload').style.display = 'none';
+        }
+
+        function uploadVideo(e) {
+            e.preventDefault();
+            const form = document.getElementById('video-form');
+            const formData = new FormData(form);
+            const btn = document.getElementById('btn-upload');
+            btn.disabled = true;
+            btn.innerHTML = '<svg class="w-5 h-5 animate-spin" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path></svg> Uploading...';
+            showProcessing('Uploading Video', 'Sending to Gemini for analysis...');
+            fetch('/api/upload_video', {method: 'POST', body: formData})
+                .then(r => r.json())
+                .then(data => {
+                    if (data.error) { toast(data.error, 'error'); hideProcessing(); }
+                    else {
+                        btn.disabled = false;
+                        btn.innerHTML = '<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"/></svg> Analyze Video';
+                        clearVideo();
+                        loadMeetings();
+                        toast('Video analysis complete!', 'success');
+                        if (data.meeting_id) showMeetingDetail(data.meeting_id);
+                    }
+                })
+                .catch(e => { toast('Upload failed', 'error'); hideProcessing(); btn.disabled = false; btn.innerHTML = '<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"/></svg> Analyze Video'; });
+        }
+
+        function testMicrophone() {
+            toast('Testing microphone (3 seconds)...', 'info');
+            fetch('/api/mic-test', {method: 'POST', headers: {'Content-Type': 'application/json'}})
+                .then(r => r.json())
+                .then(data => {
+                    if (data.error) { toast('Mic test failed: ' + data.error, 'error'); return; }
+                    const msgs = {good: 'Mic is working great!', low: 'Mic level is low. Move closer.', high: 'Mic is loud. Reduce volume.', silent: 'No audio detected. Check mic.'};
+                    const type = {good: 'success', low: 'warning', high: 'warning', silent: 'error'};
+                    toast(`${msgs[data.quality]} (Volume: ${Math.round(data.volume * 100)}%)`, type[data.quality] || 'info');
+                })
+                .catch(() => toast('Mic test failed', 'error'));
+        }
+
+        function showProcessing(title, status) {
+            document.getElementById('processing-title').textContent = title;
+            document.getElementById('processing-status').textContent = status;
+            document.getElementById('processing-bar').style.width = '0%';
+            document.getElementById('processing-section').style.display = 'block';
+            document.getElementById('processing-section').scrollIntoView({behavior: 'smooth'});
+        }
+
+        function updateProcessing(status, pct) {
+            document.getElementById('processing-status').textContent = status;
+            document.getElementById('processing-bar').style.width = pct + '%';
+        }
+
+        function hideProcessing() {
+            document.getElementById('processing-section').style.display = 'none';
+        }
+
+        function toast(msg, type = 'info') {
+            const colors = {success: 'bg-emerald-500', error: 'bg-red-500', warning: 'bg-amber-500', info: 'bg-blue-500'};
+            const icons = {
+                success: '<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>',
+                error: '<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>',
+                warning: '<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/></svg>',
+                info: '<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>',
+            };
+            const el = document.createElement('div');
+            el.className = `toast-enter d-flex align-center gap-2 ${colors[type] || colors.info} text-white px-4 py-3 rounded-xl shadow-xl text-sm font-medium`;
+            el.style.pointerEvents = 'auto';
+            el.innerHTML = icons[type] + '<span>' + escapeHtml(msg) + '</span>';
+            document.getElementById('toast-container').appendChild(el);
+            setTimeout(() => {
+                el.classList.remove('toast-enter');
+                el.classList.add('toast-exit');
+                setTimeout(() => el.remove(), 300);
+            }, 4000);
+        }
+
+        function escapeHtml(str) {
+            if (!str) return '';
+            return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+        }
+
+        function formatDuration(s) {
+            if (!s) return '0s';
+            const m = Math.floor(s / 60), sec = s % 60;
+            return m > 0 ? `${m}m ${sec}s` : `${sec}s`;
+        }
+
+        function formatTime(s) {
+            const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), sec = s % 60;
+            if (h > 0) return `${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}:${String(sec).padStart(2,'0')}`;
+            return `${String(m).padStart(2,'0')}:${String(sec).padStart(2,'0')}`;
+        }
+    </script>
+</body>
+</html>

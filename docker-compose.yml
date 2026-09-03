@@ -1,0 +1,28 @@
+version: '3.8'
+
+services:
+  app:
+    build: .
+    container_name: ai-meeting-summarizer
+    ports:
+      - "5001:5001"
+    environment:
+      - GEMINI_API_KEY=${GEMINI_API_KEY}
+      - WHISPER_MODEL=${WHISPER_MODEL:-base}
+      - WHISPER_COMPUTE=${WHISPER_COMPUTE:-int8}
+      - GEMINI_MODEL=${GEMINI_MODEL:-gemini-2.0-flash}
+      - FLASK_DEBUG=false
+      - DB_PATH=/app/data/meetings.db
+      - UPLOAD_DIR=/app/uploads_tmp
+      - MAX_VIDEO_SIZE_MB=100
+    volumes:
+      - ./data:/app/data
+      - ./logs:/app/logs
+      - ./uploads_tmp:/app/uploads_tmp
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5001/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s

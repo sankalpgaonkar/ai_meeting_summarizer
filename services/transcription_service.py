@@ -1,0 +1,103 @@
+import threading
+from typing import Optional, List
+
+import numpy as np
+from faster_whisper import WhisperModel
+
+from config import config
+from utils.logger import get_logger
+
+logger = get_logger(__name__)
+
+
+class TranscriptionService:
+    _instance: Optional["TranscriptionService"] = None
+    _lock = threading.Lock()
+
+    def __new__(cls):
+        if cls._instance is None:
+            with cls._lock:
+                if cls._instance is None:
+                    cls._instance = super().__new__(cls)
+                    cls._instance._initialized = False
+        return cls._instance
+
+    def __init__(self):
+        if self._initialized:
+            return
+        self.model: Optional[WhisperModel] = None
+        self._model_lock = threading.RLock()
+        self._initialized = True
+
+    def load_model(self) -> bool:
+        with self._model_lock:
+            if self.model is not None:
+                return True
+            try:
+                logger.info(f"Loading Whisper model: {config.whisper.MODEL_SIZE} ({config.whisper.COMPUTE_TYPE})")
+                self.model = WhisperModel(
+                    config.whisper.MODEL_SIZE,
+                    compute_type=config.whisper.COMPUTE_TYPE,
+                )
+                logger.info("Whisper model loaded")
+                return True
+            except Exception as e:
+                logger.error(f"Failed to load Whisper model: {e}")
+                return False
+
+    def is_ready(self) -> bool:
+        return self.model is not None
+
+    def transcribe(self, audio: np.ndarray, language: Optional[str] = None) -> dict:
+        if not self.is_ready():
+            if not self.load_model():
+                return {"text": "", "segments": [], "language": None, "error": "model_not_loaded"}
+        if audio.dtype != np.float32:
+            audio = audio.astype(np.float32)
+        if audio.ndim > 1:
+            audio = audio.mean(axis=1)
+        try:
+            with self._model_lock:
+                segments_iter, info = self.model.transcribe(
+                    audio,
+                    beam_size=config.whisper.BEAM_SIZE,
+                    language=language or config.whisper.LANGUAGE,
+                    task="transcribe",
+                    vad_filter=True,
+                    vad_parameters={"min_silence_duration_ms": 500},
+                )
+                segments = []
+                text_parts = []
+                for seg in segments_iter:
+                    segments.append({
+                        "start": float(seg.start),
+                        "end": float(seg.end),
+                        "text": seg.text.strip(),
+                    })
+                    text_parts.append(seg.text.strip())
+                return {
+                    "text": " ".join(text_parts).strip(),
+                    "segments": segments,
+                    "language": getattr(info, "language", None),
+                }
+        except Exception as e:
+            logger.error(f"Transcription failed: {e}")
+            return {"text": "", "segments": [], "language": None, "error": str(e)}
+
+    def transcribe_streaming(self, audio: np.ndarray, accumulated: str, language: Optional[str] = None) -> dict:
+        result = self.transcribe(audio, language)
+        if not result.get("text"):
+            return {"partial": "", "full": accumulated, "segments": []}
+        if accumulated:
+            new_full = (accumulated.rstrip() + " " + result["text"]).strip()
+        else:
+            new_full = result["text"]
+        return {
+            "partial": result["text"],
+            "full": new_full,
+            "segments": result.get("segments", []),
+            "language": result.get("language"),
+        }
+
+
+transcription_service = TranscriptionService()
