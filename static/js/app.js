@@ -1,5 +1,5 @@
 // AI Meeting Summarizer - Main Application JavaScript
-import { EventSourcePolyfill } from 'event-source-polyfill';
+// Uses native EventSource (no polyfill needed for modern browsers)
 
 class MeetingSummarizer {
     constructor() {
@@ -29,8 +29,10 @@ class MeetingSummarizer {
 
     setupEventListeners() {
         // Video file input
-        document.getElementById('video-input')
-            .addEventListener('change', (e) => this.handleVideoSelect(e.target));
+        const videoInput = document.getElementById('video-input');
+        if (videoInput) {
+            videoInput.addEventListener('change', (e) => this.handleVideoSelect(e.target));
+        }
 
         // Video dropzone
         const dropzone = document.getElementById('video-dropzone');
@@ -51,6 +53,12 @@ class MeetingSummarizer {
                     this.handleVideoSelect(document.getElementById('video-input'));
                 }
             });
+            // Click to open file dialog
+            dropzone.addEventListener('click', (e) => {
+                if (e.target.tagName !== 'INPUT') {
+                    document.getElementById('video-input').click();
+                }
+            });
         }
     }
 
@@ -60,12 +68,8 @@ class MeetingSummarizer {
         }
 
         try {
-            this.state.eventsource = new EventSourcePolyfill('/api/stream', {
-                headers: {
-                    'Accept': 'text/event-stream'
-                },
-                withCredentials: false
-            });
+            // Use native EventSource (works in modern browsers)
+            this.state.eventsource = new EventSource('/api/stream');
 
             this.state.eventsource.onopen = () => {
                 document.getElementById('sse-dot').className = 'w-2 h-2 rounded-full bg-green-500';
@@ -88,16 +92,18 @@ class MeetingSummarizer {
     }
 
     setupSSEEventHandlers() {
-        if (!this.state.eventsource) return;
+        const safeParse = (str) => {
+            try { return JSON.parse(str); } catch (e) { return {}; }
+        };
 
         this.state.eventsource.addEventListener('recording_started', (e) => {
-            const data = JSON.parse(e.data);
-            this.setState({ meetingId: data.meeting_id });
+            const data = safeParse(e.data);
+            if (data.meeting_id) this.setState({ meetingId: data.meeting_id });
             toast('Recording started', 'success');
         });
 
         this.state.eventsource.addEventListener('partial_transcript', (e) => {
-            const data = JSON.parse(e.data);
+            const data = safeParse(e.data);
             const el = document.getElementById('live-transcript');
             if (el) {
                 const text = data.text || '';
@@ -106,37 +112,51 @@ class MeetingSummarizer {
             }
         });
 
+        this.state.eventsource.addEventListener('video_upload_started', (e) => {
+            this.showProcessing('Uploading Video', 'Uploading file to server...');
+            this.updateProcessing('Uploading file...', 10);
+        });
+
+        this.state.eventsource.addEventListener('video_upload_complete', (e) => {
+            this.updateProcessing('Video saved, preparing transcription...', 25);
+        });
+
         this.state.eventsource.addEventListener('processing_started', (e) => {
-            this.showProcessing('Processing Meeting', 'Initializing analysis...');
-            document.getElementById('live-transcript-section').style.display = 'none';
+            this.showProcessing('Processing Meeting', 'Initializing transcription...');
+            const el = document.getElementById('live-transcript-section');
+            if (el) el.style.display = 'none';
+            this.updateProcessing('Transcribing audio with Whisper...', 35);
         });
 
         this.state.eventsource.addEventListener('transcription_started', (e) => {
-            this.updateProcessing('Transcribing audio...', 20);
+            this.showProcessing('Processing Meeting', 'Transcribing audio with Whisper...');
+            this.updateProcessing('Transcribing audio with Whisper...', 45);
         });
 
         this.state.eventsource.addEventListener('transcription_complete', (e) => {
-            this.updateProcessing('Analyzing content with Gemini...', 50);
+            this.updateProcessing('Analyzing content with Gemini AI...', 75);
         });
 
         this.state.eventsource.addEventListener('analysis_started', (e) => {
-            this.updateProcessing('Generating Minutes of Meeting...', 70);
+            this.updateProcessing('Generating Minutes of Meeting & Action Items...', 85);
         });
 
         this.state.eventsource.addEventListener('processing_complete', (e) => {
-            const data = JSON.parse(e.data);
-            this.updateProcessing('Done!', 100);
+            const data = safeParse(e.data);
+            this.stopPolling();
+            this.updateProcessing('Done! Loading summary...', 100);
             setTimeout(() => {
                 this.hideProcessing();
                 this.loadMeetings();
                 if (data.meeting_id) this.showMeetingDetail(data.meeting_id);
-            }, 1500);
+            }, 800);
         });
 
         this.state.eventsource.addEventListener('processing_error', (e) => {
-            const data = JSON.parse(e.data);
+            const data = safeParse(e.data);
+            this.stopPolling();
             this.hideProcessing();
-            toast('Processing failed: ' + data.error, 'error');
+            toast('Processing error: ' + (data.error || 'Unknown error'), 'error');
         });
 
         this.state.eventsource.onmessage = (e) => {
@@ -431,44 +451,7 @@ class MeetingSummarizer {
     }
 
     setupMicrophoneTest() {
-        const btn = document.querySelector('[onclick="testMicrophone()"]');
-        if (btn) {
-            btn.addEventListener('click', async () => {
-                toast('Testing microphone (3 seconds)...', 'info');
-                try {
-                    const response = await fetch('/api/mic-test', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' }
-                    });
-
-                    const data = await response.json();
-
-                    if (data.error) {
-                        toast('Mic test failed: ' + data.error, 'error');
-                        return;
-                    }
-
-                    const messages = {
-                        good: 'Mic is working great!',
-                        low: 'Mic level is low. Move closer.',
-                        high: 'Mic is loud. Reduce volume.',
-                        silent: 'No audio detected. Check mic.'
-                    };
-
-                    const types = {
-                        good: 'success',
-                        low: 'warning',
-                        high: 'warning',
-                        silent: 'error'
-                    };
-
-                    toast(`${messages[data.quality]} (Volume: ${Math.round(data.volume * 100)}%)`, types[data.quality] || 'info');
-
-                } catch (error) {
-                    toast('Mic test failed', 'error');
-                }
-            });
-        }
+        // No setup needed - test is handled by inline onclick
     }
 
     setupVideoUpload() {
@@ -489,7 +472,8 @@ class MeetingSummarizer {
         btn.disabled = true;
         btn.innerHTML = '<svg class="w-5 h-5 animate-spin" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path></svg> Uploading...';
 
-        this.showProcessing('Uploading Video', 'Sending to Gemini for analysis...');
+        this.showProcessing('Uploading Video', 'Uploading file to server...');
+        this.updateProcessing('Uploading file...', 15);
 
         try {
             const response = await fetch('/api/upload_video', {
@@ -499,22 +483,71 @@ class MeetingSummarizer {
 
             const data = await response.json();
 
+            btn.disabled = false;
+            btn.innerHTML = '<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"/></svg> Analyze Video';
+
             if (data.error) {
                 toast(data.error, 'error');
                 this.hideProcessing();
             } else {
-                btn.disabled = false;
-                btn.innerHTML = '<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"/></svg> Analyze Video';
                 this.clearVideo();
                 this.loadMeetings();
-                toast('Video analysis complete!', 'success');
-                if (data.meeting_id) this.showMeetingDetail(data.meeting_id);
+                toast('Video uploaded! Transcribing & analyzing...', 'info');
+                this.updateProcessing('Transcribing audio with Whisper...', 35);
+                if (data.meeting_id) {
+                    this.startPolling(data.meeting_id);
+                }
             }
         } catch (error) {
-            toast('Upload failed', 'error');
+            toast('Upload failed: ' + error.message, 'error');
             this.hideProcessing();
             btn.disabled = false;
             btn.innerHTML = '<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"/></svg> Analyze Video';
+        }
+    }
+
+    startPolling(meetingId) {
+        this.stopPolling();
+        let attempts = 0;
+        this.state.pollInterval = setInterval(async () => {
+            attempts++;
+            if (attempts > 120) { // 4 minutes timeout
+                this.stopPolling();
+                return;
+            }
+            try {
+                const response = await fetch(`/api/meetings/${meetingId}`);
+                if (!response.ok) return;
+                const meeting = await response.json();
+
+                if (meeting.status === 'complete') {
+                    this.stopPolling();
+                    this.updateProcessing('Done! Loading summary...', 100);
+                    setTimeout(() => {
+                        this.hideProcessing();
+                        this.loadMeetings();
+                        this.showMeetingDetail(meetingId);
+                    }, 500);
+                } else if (meeting.status === 'error' || meeting.status === 'no_speech' || meeting.status === 'empty') {
+                    this.stopPolling();
+                    this.hideProcessing();
+                    this.loadMeetings();
+                    this.showMeetingDetail(meetingId);
+                } else if (meeting.status === 'transcribed') {
+                    this.updateProcessing('Generating summary with Gemini AI...', 70);
+                } else if (meeting.status === 'processing_video' || meeting.status === 'uploading') {
+                    this.updateProcessing('Transcribing audio with Whisper...', Math.min(30 + attempts * 2, 65));
+                }
+            } catch (e) {
+                // Ignore polling errors
+            }
+        }, 2000);
+    }
+
+    stopPolling() {
+        if (this.state.pollInterval) {
+            clearInterval(this.state.pollInterval);
+            this.state.pollInterval = null;
         }
     }
 
@@ -616,5 +649,31 @@ class MeetingSummarizer {
 // Initialize the app when the page loads
 const app = new MeetingSummarizer();
 
-// Export for potential module usage
-export default MeetingSummarizer;
+// Expose functions for inline onclick handlers in template
+// This is needed because the template uses onclick="functionName()"
+window.app = app;
+window.loadMeetings = () => app.loadMeetings();
+window.connectSSE = () => app.connectSSE();
+window.testMicrophone = () => {
+    toast('Testing microphone (3 seconds)...', 'info');
+    fetch('/api/mic-test', {method: 'POST', headers: {'Content-Type': 'application/json'}})
+        .then(r => r.json())
+        .then(data => {
+            if (data.error) { toast('Mic test failed: ' + data.error, 'error'); return; }
+            const msgs = {good: 'Mic is working great!', low: 'Mic level is low. Move closer.', high: 'Mic is loud. Reduce volume.', silent: 'No audio detected. Check mic.'};
+            const types = {good: 'success', low: 'warning', high: 'warning', silent: 'error'};
+            toast(`${msgs[data.quality]} (Volume: ${Math.round(data.volume * 100)}%)`, types[data.quality] || 'info');
+        })
+        .catch(() => toast('Mic test failed', 'error'));
+};
+window.startRecording = () => app.startRecording();
+window.stopRecording = () => app.stopRecording();
+window.handleVideoSelect = (input) => app.handleVideoSelect(input);
+window.uploadVideo = (e) => {
+    if (e) e.preventDefault();
+    app.uploadVideo();
+};
+window.clearVideo = () => app.clearVideo();
+window.deleteMeeting = (id) => app.deleteMeeting(id);
+window.showMeetingDetail = (id) => app.showMeetingDetail(id);
+window.showHome = () => app.showHome();

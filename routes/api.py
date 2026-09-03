@@ -1,4 +1,5 @@
 import time
+import json
 import threading
 from datetime import datetime
 
@@ -34,7 +35,13 @@ def sse_remove(subscriber):
 
 
 def emit_sse(event: str, data: dict):
-    payload = f"event: {event}\ndata: {data}\n\n"
+    try:
+        json_data = json.dumps(data)
+        payload = f"event: {event}\ndata: {json_data}\n\n"
+    except Exception as e:
+        logger.error(f"Failed to serialize SSE event {event}: {e}")
+        return
+
     dead = []
     with _sse_lock:
         for sub in _current_sse_subscribers:
