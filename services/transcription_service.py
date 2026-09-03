@@ -42,7 +42,8 @@ class TranscriptionService:
                 self.model = WhisperModel(
                     config.whisper.MODEL_SIZE,
                     compute_type=config.whisper.COMPUTE_TYPE,
-                    num_workers=1,  # Single worker for real-time
+                    cpu_threads=config.whisper.CPU_THREADS,
+                    num_workers=1,
                 )
                 logger.info("Whisper model loaded")
                 return True

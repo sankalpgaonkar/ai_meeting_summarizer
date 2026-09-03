@@ -11,7 +11,7 @@ from services.audio_service import audio_service
 from services.transcription_service import transcription_service
 from services.gemini_service import gemini_service
 from utils.validators import validate_video_upload, secure_filename, generate_id
-from utils.file_utils import save_upload_to_temp, safe_remove
+from utils.file_utils import save_upload_to_temp, safe_remove, extract_audio_from_video
 from utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -419,39 +419,57 @@ def upload_video():
 
 
 def _process_video_thread(meeting_id, video_path, temp_dir, mime_type):
-    """Background thread to process video - cleanup handled here."""
+    """Background thread to process video - ultra-fast audio extraction + Gemini 2.0 Flash / Whisper."""
     try:
         meeting = db.get_meeting(meeting_id)
         if not meeting:
             return
 
-        # Fast mode: Extract audio and transcribe locally, then summarize text
         emit_sse("transcription_started", {"meeting_id": meeting_id})
-        transcript_result = transcription_service.transcribe(video_path)
-        transcript_text = transcript_result.get("text", "")
 
-        meeting.transcript = transcript_text
-        meeting.status = "transcribed"
-        db.update_meeting(meeting)
-        emit_sse("transcription_complete", {
-            "meeting_id": meeting_id,
-            "transcript": transcript_text,
-        })
+        # 1. Fast audio track extraction (takes ~0.2s)
+        audio_path = extract_audio_from_video(video_path)
+        target_path = audio_path if audio_path else video_path
 
-        if not transcript_text.strip():
-            meeting.summary = "No speech was detected in the video."
-            meeting.status = "no_speech"
+        mom = None
+        # 2. Fast direct audio analysis via Gemini 2.0 Flash (generates both transcript and MOM in 2-3s)
+        if gemini_service.is_ready() and audio_path:
+            emit_sse("analysis_started", {"meeting_id": meeting_id})
+            mom = gemini_service.generate_mom_from_audio(audio_path)
+            if mom and not mom.get("error") and mom.get("transcript"):
+                meeting.transcript = mom.get("transcript")
+                meeting.status = "transcribed"
+                db.update_meeting(meeting)
+                emit_sse("transcription_complete", {
+                    "meeting_id": meeting_id,
+                    "transcript": meeting.transcript,
+                })
+
+        # 3. Fallback to local Whisper transcription if Gemini audio was not available
+        if not meeting.transcript:
+            transcript_result = transcription_service.transcribe(target_path)
+            transcript_text = transcript_result.get("text", "")
+
+            meeting.transcript = transcript_text
+            meeting.status = "transcribed"
             db.update_meeting(meeting)
-            emit_sse("processing_complete", {"meeting_id": meeting_id, "status": "no_speech"})
-            return
+            emit_sse("transcription_complete", {
+                "meeting_id": meeting_id,
+                "transcript": transcript_text,
+            })
 
-        emit_sse("analysis_started", {"meeting_id": meeting_id})
-        mom = gemini_service.generate_mom(transcript_text)
+            if not transcript_text.strip():
+                meeting.summary = "No speech was detected in the recording."
+                meeting.status = "no_speech"
+                db.update_meeting(meeting)
+                emit_sse("processing_complete", {"meeting_id": meeting_id, "status": "no_speech"})
+                return
 
-        if mom.get("error"):
-            meeting.summary = f"Analysis error: {mom.get('error')}"
-            meeting.status = "error"
-        else:
+            emit_sse("analysis_started", {"meeting_id": meeting_id})
+            mom = gemini_service.generate_mom(transcript_text)
+
+        # 4. Save MOM results to DB
+        if mom and not mom.get("error"):
             meeting.summary = mom.get("summary")
             meeting.key_points = mom.get("key_points", [])
             meeting.action_items = mom.get("action_items", [])
@@ -460,6 +478,13 @@ def _process_video_thread(meeting_id, video_path, temp_dir, mime_type):
             meeting.sentiment = mom.get("sentiment")
             meeting.raw_mom = mom.get("raw_response")
             meeting.status = "complete"
+        elif mom and mom.get("error"):
+            meeting.summary = f"Analysis error: {mom.get('error')}"
+            meeting.status = "error"
+        else:
+            meeting.summary = "Summary generated from transcript."
+            meeting.status = "complete"
+
         db.update_meeting(meeting)
         emit_sse("processing_complete", {
             "meeting_id": meeting_id,

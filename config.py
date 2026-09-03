@@ -33,7 +33,8 @@ class AudioConfig:
 class WhisperConfig:
     MODEL_SIZE: str = os.environ.get("WHISPER_MODEL", "base")
     COMPUTE_TYPE: str = os.environ.get("WHISPER_COMPUTE", "int8")
-    BEAM_SIZE: int = 5
+    BEAM_SIZE: int = int(os.environ.get("WHISPER_BEAM_SIZE", "1"))
+    CPU_THREADS: int = int(os.environ.get("WHISPER_CPU_THREADS", "4"))
     LANGUAGE: Optional[str] = None
 
 

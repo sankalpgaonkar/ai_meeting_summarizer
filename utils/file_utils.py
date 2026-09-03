@@ -73,3 +73,40 @@ def save_upload_streamed(file_storage, chunk_size: int = 1024 * 1024) -> tuple[s
 
     logger.info(f"Streamed upload to {safe_path}")
     return safe_path, temp_dir
+
+
+def extract_audio_from_video(video_path: str, output_path: Optional[str] = None) -> Optional[str]:
+    """Extract compressed mono audio track from video file in milliseconds using ffmpeg."""
+    import subprocess
+    try:
+        import imageio_ffmpeg
+        ffmpeg_exe = imageio_ffmpeg.get_ffmpeg_exe()
+    except Exception as e:
+        logger.warning(f"imageio_ffmpeg not available: {e}")
+        ffmpeg_exe = "ffmpeg"
+
+    if not output_path:
+        base, _ = os.path.splitext(video_path)
+        output_path = f"{base}_audio.mp3"
+
+    cmd = [
+        ffmpeg_exe,
+        "-y",
+        "-i", video_path,
+        "-vn",
+        "-acodec", "libmp3lame",
+        "-b:a", "96k",
+        "-ar", "16000",
+        "-ac", "1",
+        output_path
+    ]
+
+    try:
+        res = subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=60)
+        if res.returncode == 0 and os.path.exists(output_path) and os.path.getsize(output_path) > 0:
+            logger.info(f"Extracted audio track to {output_path} ({os.path.getsize(output_path) / 1024:.1f} KB)")
+            return output_path
+    except Exception as e:
+        logger.error(f"Audio extraction error: {e}")
+
+    return None

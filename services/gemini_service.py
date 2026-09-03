@@ -116,10 +116,26 @@ Return ONLY a valid JSON object with this exact structure:
   "sentiment": "positive" | "neutral" | "negative",
   "visual_notes": ["observation about slides / screen-share content, or 'No visual content detected'"]
 }}
+"""
+
+AUDIO_PROMPT = """You are a senior executive assistant analyzing a meeting audio recording.
+
+Please transcribe the conversation verbatim and produce structured Minutes of Meeting (MOM).
+Return ONLY a valid JSON object with this exact structure:
+{{
+  "transcript": "Full transcript of everything spoken in the audio recording",
+  "summary": "A concise 2-3 sentence overview of what the meeting was about and main conclusions",
+  "key_points": ["point 1", "point 2"],
+  "action_items": [{{"task": "what needs to be done", "owner": "person/team if mentioned, else null", "due": "deadline if mentioned, else null"}}],
+  "decisions": ["decision 1", "decision 2"],
+  "next_steps": ["step 1", "step 2"],
+  "sentiment": "positive" | "neutral" | "negative"
+}}
 
 Rules:
-- Incorporate both audio and any visible slides / screen-share / diagrams.
-- Be specific. No filler. No preamble. No markdown fences.
+- Capture all spoken dialogue accurately in the "transcript" field.
+- Be specific and concise. No filler.
+- Output STRICTLY valid JSON without markdown code fences or conversational text.
 """
 
 
@@ -294,6 +310,62 @@ class GeminiService:
                 logger.warning(f"File state check error: {e}")
             time.sleep(0.5)  # Faster polling
         logger.warning(f"File did not become ACTIVE within {max_wait}s, proceeding anyway")
+
+    def generate_mom_from_audio(self, audio_path: str, mime_type: str = "audio/mp3") -> dict:
+        """Ultra-fast: send audio directly to Gemini 2.0 Flash for instant transcription and structured MOM in 2-3s."""
+        if not self.is_ready():
+            return {**MOM_SCHEMA, "error": "gemini_not_configured"}
+
+        if not os.path.exists(audio_path):
+            logger.error(f"Audio file not found: {audio_path}")
+            return {**MOM_SCHEMA, "error": "audio_file_not_found"}
+
+        file_size_mb = os.path.getsize(audio_path) / 1024 / 1024
+        logger.info(f"Processing audio with Gemini: {audio_path} ({file_size_mb:.2f}MB)")
+
+        try:
+            model_name = config.gemini.MODEL
+            if model_name not in self._model_cache:
+                self._model_cache[model_name] = genai.GenerativeModel(model_name)
+            model = self._model_cache[model_name]
+
+            # For files < 20MB, send inline data (instant, no cloud upload queue)
+            if file_size_mb < 20.0:
+                with open(audio_path, "rb") as f:
+                    audio_bytes = f.read()
+                audio_part = {"mime_type": mime_type, "data": audio_bytes}
+                response = model.generate_content(
+                    [AUDIO_PROMPT, audio_part],
+                    generation_config=genai.types.GenerationConfig(
+                        temperature=0.1,
+                        top_p=0.8,
+                        max_output_tokens=4096,
+                    ),
+                    request_options={"timeout": 60},
+                )
+            else:
+                uploaded = genai.upload_file(path=audio_path, mime_type=mime_type)
+                self._wait_for_file_active(uploaded.name, max_wait=60)
+                response = model.generate_content(
+                    [AUDIO_PROMPT, uploaded],
+                    generation_config=genai.types.GenerationConfig(
+                        temperature=0.1,
+                        top_p=0.8,
+                        max_output_tokens=4096,
+                    ),
+                    request_options={"timeout": 60},
+                )
+
+            text = getattr(response, "text", "") or ""
+            raw_json = self._extract_json(text)
+            mom = self._normalize(raw_json)
+            if raw_json and isinstance(raw_json, dict):
+                mom["transcript"] = str(raw_json.get("transcript") or "").strip()
+            mom["raw_response"] = text
+            return mom
+        except Exception as e:
+            logger.error(f"Audio Gemini MOM failed: {e}")
+            return {**MOM_SCHEMA, "error": str(e)}
 
 
 gemini_service = GeminiService()
