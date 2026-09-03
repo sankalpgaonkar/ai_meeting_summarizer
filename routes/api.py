@@ -235,13 +235,18 @@ def stop_capture():
 
 
 def _process_meeting_thread(meeting_id, audio_data):
+    """Optimized: fetch meeting once, reuse throughout processing."""
     try:
-        emit_sse("transcription_started", {"meeting_id": meeting_id})
-        transcript_result = transcription_service.transcribe(audio_data)
-        transcript_text = transcript_result.get("text", "")
+        # Fetch meeting once at the start
         meeting = db.get_meeting(meeting_id)
         if not meeting:
             return
+
+        emit_sse("transcription_started", {"meeting_id": meeting_id})
+        transcript_result = transcription_service.transcribe(audio_data)
+        transcript_text = transcript_result.get("text", "")
+
+        # Update meeting with transcript
         meeting.transcript = transcript_text
         meeting.duration_seconds = int(audio_data.shape[0] / config.audio.SAMPLERATE)
         meeting.status = "transcribed"
@@ -250,17 +255,18 @@ def _process_meeting_thread(meeting_id, audio_data):
             "meeting_id": meeting_id,
             "transcript": transcript_text,
         })
+
         if not transcript_text.strip():
             meeting.summary = "No speech was detected in the recording. Please ensure the microphone was active and participants were speaking."
             meeting.status = "no_speech"
             db.update_meeting(meeting)
             emit_sse("processing_complete", {"meeting_id": meeting_id, "status": "no_speech"})
             return
+
         emit_sse("analysis_started", {"meeting_id": meeting_id})
         mom = gemini_service.generate_mom(transcript_text)
-        meeting = db.get_meeting(meeting_id)
-        if not meeting:
-            return
+
+        # Update meeting with MOM results
         if mom.get("error"):
             meeting.summary = f"Analysis error: {mom.get('error')}"
             meeting.status = "error"
@@ -344,6 +350,7 @@ def get_status():
 
 @api.route("/upload_video", methods=["POST"])
 def upload_video():
+    """Optimized: process video in background thread to return response fast."""
     if "video" not in request.files:
         return jsonify({"error": "No video file uploaded"}), 400
     video_file = request.files["video"]
@@ -366,17 +373,74 @@ def upload_video():
     db.create_meeting(meeting)
     emit_sse("video_upload_started", {"meeting_id": meeting_id})
     try:
+        # Save file first to get path
         video_path, temp_dir = save_upload_to_temp(video_file)
         meeting.video_filename = video_path
         meeting.status = "processing_video"
         db.update_meeting(meeting)
         emit_sse("video_upload_complete", {"meeting_id": meeting_id})
         emit_sse("processing_started", {"meeting_id": meeting_id})
+
+        # Run video analysis in background thread for fast response
         mime_type = video_file.content_type or "video/mp4"
-        mom = gemini_service.generate_mom_from_video(video_path, mime_type)
+        thread = threading.Thread(
+            target=_process_video_thread,
+            args=(meeting_id, video_path, temp_dir, mime_type),
+            daemon=True,
+            name=f"process-video-{meeting_id[:8]}",
+        )
+        thread.start()
+
+        return jsonify({
+            "status": "processing",
+            "meeting_id": meeting_id,
+            "result": meeting.to_dict(),
+        })
+    except Exception as e:
+        logger.error(f"Video upload error: {e}")
+        try:
+            meeting = db.get_meeting(meeting_id)
+            if meeting:
+                meeting.status = "error"
+                meeting.summary = f"Upload failed: {str(e)}"
+                db.update_meeting(meeting)
+        except Exception:
+            pass
+        emit_sse("processing_error", {"meeting_id": meeting_id, "error": str(e)})
+        return jsonify({"error": str(e)}), 500
+    # Note: We DON'T delete temp_dir here - the background thread will handle cleanup
+
+
+def _process_video_thread(meeting_id, video_path, temp_dir, mime_type):
+    """Background thread to process video - cleanup handled here."""
+    try:
         meeting = db.get_meeting(meeting_id)
         if not meeting:
-            return jsonify({"error": "Meeting not found"}), 404
+            return
+
+        # Fast mode: Extract audio and transcribe locally, then summarize text
+        emit_sse("transcription_started", {"meeting_id": meeting_id})
+        transcript_result = transcription_service.transcribe(video_path)
+        transcript_text = transcript_result.get("text", "")
+
+        meeting.transcript = transcript_text
+        meeting.status = "transcribed"
+        db.update_meeting(meeting)
+        emit_sse("transcription_complete", {
+            "meeting_id": meeting_id,
+            "transcript": transcript_text,
+        })
+
+        if not transcript_text.strip():
+            meeting.summary = "No speech was detected in the video."
+            meeting.status = "no_speech"
+            db.update_meeting(meeting)
+            emit_sse("processing_complete", {"meeting_id": meeting_id, "status": "no_speech"})
+            return
+
+        emit_sse("analysis_started", {"meeting_id": meeting_id})
+        mom = gemini_service.generate_mom(transcript_text)
+
         if mom.get("error"):
             meeting.summary = f"Analysis error: {mom.get('error')}"
             meeting.status = "error"
@@ -395,23 +459,18 @@ def upload_video():
             "status": meeting.status,
             "summary": meeting.summary,
         })
-        return jsonify({
-            "status": "success",
-            "meeting_id": meeting_id,
-            "result": meeting.to_dict(),
-        })
     except Exception as e:
-        logger.error(f"Video upload error: {e}")
+        logger.error(f"Video processing error: {e}")
         try:
             meeting = db.get_meeting(meeting_id)
             if meeting:
                 meeting.status = "error"
-                meeting.summary = f"Upload failed: {str(e)}"
+                meeting.summary = f"Processing failed: {str(e)}"
                 db.update_meeting(meeting)
         except Exception:
             pass
         emit_sse("processing_error", {"meeting_id": meeting_id, "error": str(e)})
-        return jsonify({"error": str(e)}), 500
     finally:
+        # Cleanup temp directory AFTER processing is done
         if temp_dir:
             safe_remove(temp_dir)

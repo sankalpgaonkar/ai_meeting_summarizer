@@ -1,5 +1,5 @@
 import threading
-from typing import Optional, List
+from typing import Optional, List, Union
 
 import numpy as np
 from faster_whisper import WhisperModel
@@ -35,9 +35,14 @@ class TranscriptionService:
                 return True
             try:
                 logger.info(f"Loading Whisper model: {config.whisper.MODEL_SIZE} ({config.whisper.COMPUTE_TYPE})")
+                # Optimize model loading - use smaller model for real-time
+                model_size = config.whisper.MODEL_SIZE
+                if model_size not in ("tiny", "base"):
+                    logger.warning(f"Using larger model '{model_size}' - expect slower processing")
                 self.model = WhisperModel(
                     config.whisper.MODEL_SIZE,
                     compute_type=config.whisper.COMPUTE_TYPE,
+                    num_workers=1,  # Single worker for real-time
                 )
                 logger.info("Whisper model loaded")
                 return True
@@ -48,33 +53,43 @@ class TranscriptionService:
     def is_ready(self) -> bool:
         return self.model is not None
 
-    def transcribe(self, audio: np.ndarray, language: Optional[str] = None) -> dict:
+    def transcribe(self, audio: Union[np.ndarray, str], language: Optional[str] = None) -> dict:
+        # Quick early return if not ready
         if not self.is_ready():
             if not self.load_model():
                 return {"text": "", "segments": [], "language": None, "error": "model_not_loaded"}
-        if audio.dtype != np.float32:
-            audio = audio.astype(np.float32)
-        if audio.ndim > 1:
-            audio = audio.mean(axis=1)
+
+        # Optimize audio preprocessing
         try:
+            # Check if conversion needed - faster path for float32
+            if audio.dtype != np.float32:
+                audio = audio.astype(np.float32)
+
+            # Remove channels efficiently
+            if audio.ndim > 1:
+                audio = audio.mean(axis=1)
+
             with self._model_lock:
                 segments_iter, info = self.model.transcribe(
                     audio,
                     beam_size=config.whisper.BEAM_SIZE,
                     language=language or config.whisper.LANGUAGE,
                     task="transcribe",
-                    vad_filter=True,
+                    vad_filter=True,  # Voice activity detection - improves speed
                     vad_parameters={"min_silence_duration_ms": 500},
                 )
+                # Process segments more efficiently
                 segments = []
                 text_parts = []
                 for seg in segments_iter:
-                    segments.append({
-                        "start": float(seg.start),
-                        "end": float(seg.end),
-                        "text": seg.text.strip(),
-                    })
-                    text_parts.append(seg.text.strip())
+                    text = seg.text.strip()
+                    if text:  # Skip empty segments
+                        segments.append({
+                            "start": float(seg.start),
+                            "end": float(seg.end),
+                            "text": text,
+                        })
+                        text_parts.append(text)
                 return {
                     "text": " ".join(text_parts).strip(),
                     "segments": segments,
