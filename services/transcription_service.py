@@ -62,13 +62,11 @@ class TranscriptionService:
 
         # Optimize audio preprocessing
         try:
-            # Check if conversion needed - faster path for float32
-            if audio.dtype != np.float32:
-                audio = audio.astype(np.float32)
-
-            # Remove channels efficiently
-            if audio.ndim > 1:
-                audio = audio.mean(axis=1)
+            if isinstance(audio, np.ndarray):
+                if audio.dtype != np.float32:
+                    audio = audio.astype(np.float32)
+                if audio.ndim > 1:
+                    audio = audio.mean(axis=1)
 
             with self._model_lock:
                 segments_iter, info = self.model.transcribe(
