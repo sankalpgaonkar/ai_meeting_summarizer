@@ -35,7 +35,8 @@ def save_upload_to_temp(file_storage, suffix: Optional[str] = None) -> tuple[str
 
     Optimized: uses stream-based copy for large files instead of loading into memory.
     """
-    temp_dir = ensure_dir(tempfile.mkdtemp(prefix="meeting_", dir=config.storage.UPLOAD_DIR))
+    upload_base = ensure_dir(config.storage.UPLOAD_DIR)
+    temp_dir = tempfile.mkdtemp(prefix="meeting_", dir=upload_base)
     filename = file_storage.filename or "upload"
     if suffix:
         base, ext = os.path.splitext(filename)
@@ -59,7 +60,8 @@ def save_upload_streamed(file_storage, chunk_size: int = 1024 * 1024) -> tuple[s
     Returns:
         tuple of (file_path, temp_dir)
     """
-    temp_dir = ensure_dir(tempfile.mkdtemp(prefix="meeting_", dir=config.storage.UPLOAD_DIR))
+    upload_base = ensure_dir(config.storage.UPLOAD_DIR)
+    temp_dir = tempfile.mkdtemp(prefix="meeting_", dir=upload_base)
     filename = file_storage.filename or "upload"
     safe_path = os.path.join(temp_dir, filename)
 

@@ -27,18 +27,18 @@ def validate_video_upload(file: FileStorage) -> None:
             f"File type not allowed. Allowed: {', '.join(config.storage.ALLOWED_VIDEO_TYPES)}"
         )
 
-    # Use content_length from headers if available (fast - no file read needed)
-    # Flask's MAX_CONTENT_LENGTH already enforces the limit, so this is just a fallback check
-    size = file.content_length
-    if size is not None:
-        max_bytes = config.storage.MAX_VIDEO_SIZE_MB * 1024 * 1024
-        if size > max_bytes:
-            raise ValidationError(
-                f"File too large: {size / 1024 / 1024:.1f}MB exceeds limit of {config.storage.MAX_VIDEO_SIZE_MB}MB"
-            )
-        if size == 0:
-            raise ValidationError("Empty file uploaded")
-    # If content_length is None (streamed), we trust Flask's MAX_CONTENT_LENGTH
+    # Accurately verify file size using seek/tell (instantaneous on file descriptor)
+    file.seek(0, os.SEEK_END)
+    size = file.tell()
+    file.seek(0)
+
+    max_bytes = config.storage.MAX_VIDEO_SIZE_MB * 1024 * 1024
+    if size > max_bytes:
+        raise ValidationError(
+            f"File too large: {size / 1024 / 1024:.1f}MB exceeds limit of {config.storage.MAX_VIDEO_SIZE_MB}MB"
+        )
+    if size == 0:
+        raise ValidationError("Uploaded file is empty (0 bytes)")
 
 
 def allowed_video_extension(filename: str) -> bool:
