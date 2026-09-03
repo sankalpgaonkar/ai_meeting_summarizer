@@ -41,6 +41,8 @@ class WhisperConfig:
 class GeminiConfig:
     API_KEY: Optional[str] = field(default_factory=lambda: os.environ.get("GEMINI_API_KEY"))
     MODEL: str = os.environ.get("GEMINI_MODEL", "gemini-2.0-flash")
+    VIDEO_MODEL: str = os.environ.get("GEMINI_VIDEO_MODEL", "gemini-2.0-flash")
+    TEXT_MODEL: str = os.environ.get("GEMINI_TEXT_MODEL", "gemini-2.0-flash")
     TIMEOUT_SEC: int = int(os.environ.get("GEMINI_TIMEOUT", "60"))
     MAX_RETRIES: int = 3
 

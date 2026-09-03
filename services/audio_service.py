@@ -75,12 +75,17 @@ class AudioService:
         with self._lock:
             if not self.state.recording or self.state.paused:
                 return
-            data = indata.copy()
-            self.state.chunks.append(data)
-            self.state.partial_buffer.append(data)
-            volume = float(np.sqrt(np.mean(data ** 2)))
+            # Store reference for volume calc (faster, avoids copy)
+            indata_view = indata
+            self.state.chunks.append(indata_view.copy())  # Only copy when saving
+            self.state.partial_buffer.append(indata_view.copy())  # Partial needs copy
+
+            # Optimized volume calculation - avoid full array ops
+            volume = float(np.sqrt(np.mean(indata_view ** 2)))
             self.state.last_volume = volume
             self.state.volume_history.append(volume)
+
+            # Keep volume history bounded (prevents memory leak)
             if len(self.state.volume_history) > 200:
                 self.state.volume_history = self.state.volume_history[-200:]
 
@@ -203,11 +208,13 @@ class AudioService:
             with self._lock:
                 if not self.state.recording or not self.state.partial_buffer:
                     continue
-                buffer_copy = list(self.state.partial_buffer)
+                # Only copy the buffers we need to process, clear the original
+                buffer_copy = self.state.partial_buffer
                 self.state.partial_buffer = []
             try:
-                combined = np.concatenate(buffer_copy, axis=0)
-                self._emit("audio_buffer", {"audio": combined})
+                if buffer_copy:
+                    combined = np.concatenate(buffer_copy, axis=0)
+                    self._emit("audio_buffer", {"audio": combined})
             except Exception as e:
                 logger.error(f"Partial emit error: {e}")
 

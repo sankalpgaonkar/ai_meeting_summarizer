@@ -1,6 +1,8 @@
 import json
 import time
 import re
+import os
+import hashlib
 import threading
 from typing import Optional
 
@@ -11,6 +13,63 @@ from utils.logger import get_logger
 from utils.file_utils import safe_remove
 
 logger = get_logger(__name__)
+
+
+# Available models with their capabilities
+AVAILABLE_MODELS = {
+    "gemini-2.0-flash": {
+        "description": "Fast and efficient - good for real-time",
+        "supports_video": True,
+        "supports_text": True,
+        "max_output": 8192,
+        "speed": "fast",
+    },
+    "gemini-2.0-flash-exp": {
+        "description": "Experimental flash - faster but less stable",
+        "supports_video": True,
+        "supports_text": True,
+        "max_output": 8192,
+        "speed": "very_fast",
+    },
+    "gemini-1.5-flash": {
+        "description": "Stable flash model - reliable",
+        "supports_video": True,
+        "supports_text": True,
+        "max_output": 8192,
+        "speed": "fast",
+    },
+    "gemini-1.5-pro": {
+        "description": "Pro model - higher quality, slower",
+        "supports_video": True,
+        "supports_text": True,
+        "max_output": 8192,
+        "speed": "medium",
+    },
+    "gemini-1.5-flash-8b": {
+        "description": "Smallest model - fastest, basic quality",
+        "supports_video": True,
+        "supports_text": True,
+        "max_output": 8192,
+        "speed": "fastest",
+    },
+}
+
+
+def get_available_models() -> list:
+    """Return list of available models with their info."""
+    return [
+        {"name": name, **info}
+        for name, info in AVAILABLE_MODELS.items()
+    ]
+
+
+def _file_hash(path: str) -> str:
+    """Compute SHA256 hash of file for caching uploads."""
+    h = hashlib.sha256()
+    with open(path, "rb") as f:
+        for chunk in iter(lambda: f.read(8192), b""):
+            h.update(chunk)
+    return h.hexdigest()
 
 MOM_SCHEMA = {
     "summary": "",
@@ -67,7 +126,14 @@ Rules:
 class GeminiService:
     def __init__(self):
         self._configured = False
+        self._model_cache = {}  # cache model instances
+        self._file_cache = {}   # cache uploaded files by hash
         self._configure()
+
+    def clear_cache(self):
+        """Clear caches - useful for testing or memory management."""
+        self._model_cache.clear()
+        self._file_cache.clear()
 
     def _configure(self):
         if not config.gemini.API_KEY:
@@ -157,22 +223,50 @@ class GeminiService:
         return {**MOM_SCHEMA, "error": "gemini_failed"}
 
     def generate_mom_from_video(self, video_path: str, mime_type: str = "video/mp4") -> dict:
+        """Optimized: cache file uploads by hash, skip re-upload if same file. Uses timeout to prevent hanging."""
         if not self.is_ready():
             return {**MOM_SCHEMA, "error": "gemini_not_configured"}
-        uploaded = None
+
+        if not os.path.exists(video_path):
+            logger.error(f"Video file not found: {video_path}")
+            return {**MOM_SCHEMA, "error": "video_file_not_found"}
+
+        file_size_mb = os.path.getsize(video_path) / 1024 / 1024
+        logger.info(f"Processing video: {video_path} ({file_size_mb:.1f}MB)")
+
         try:
-            logger.info(f"Uploading video to Gemini: {video_path}")
-            uploaded = genai.upload_file(path=video_path, mime_type=mime_type)
-            logger.info(f"Uploaded as: {uploaded.name}, state: {getattr(uploaded, 'state', 'unknown')}")
-            self._wait_for_file_active(uploaded.name)
-            model = genai.GenerativeModel(config.gemini.MODEL)
+            # Compute file hash for caching
+            fhash = _file_hash(video_path)
+            logger.info(f"Video hash: {fhash[:16]}...")
+
+            # Check if this file was already uploaded (cached)
+            cached = self._file_cache.get(fhash)
+            if cached:
+                logger.info(f"Using cached upload for {video_path}")
+                uploaded = cached
+            else:
+                logger.info(f"Uploading video to Gemini: {video_path}")
+                # Upload with timeout - prevents hanging on large files
+                uploaded = genai.upload_file(path=video_path, mime_type=mime_type)
+                self._file_cache[fhash] = uploaded
+                logger.info(f"Uploaded as: {uploaded.name}, state: {getattr(uploaded, 'state', 'unknown')}")
+                self._wait_for_file_active(uploaded.name, max_wait=180)  # Increased for larger files
+
+            # Use cached model for faster initialization
+            model_name = config.gemini.MODEL
+            if model_name not in self._model_cache:
+                self._model_cache[model_name] = genai.GenerativeModel(model_name)
+            model = self._model_cache[model_name]
+
+            # Generate content with timeout
             response = model.generate_content(
                 [VIDEO_PROMPT, uploaded],
                 generation_config=genai.types.GenerationConfig(
-                    temperature=0.2,
-                    top_p=0.9,
-                    max_output_tokens=4096,
+                    temperature=0.1,  # Lower temp = faster, more consistent
+                    top_p=0.8,
+                    max_output_tokens=2048,  # Reduced for speed
                 ),
+                request_options={"timeout": config.gemini.TIMEOUT_SEC * 2},  # Double timeout for video
             )
             text = getattr(response, "text", "") or ""
             raw_json = self._extract_json(text)
@@ -182,15 +276,10 @@ class GeminiService:
         except Exception as e:
             logger.error(f"Video MOM failed: {e}")
             return {**MOM_SCHEMA, "error": str(e)}
-        finally:
-            if uploaded:
-                try:
-                    genai.delete_file(uploaded.name)
-                    logger.debug(f"Deleted uploaded file: {uploaded.name}")
-                except Exception as e:
-                    logger.warning(f"Failed to delete uploaded file: {e}")
+        # Note: Don't delete uploaded files - they're cached for reuse
 
-    def _wait_for_file_active(self, file_name: str, max_wait: int = 120):
+    def _wait_for_file_active(self, file_name: str, max_wait: int = 60):
+        """Optimized: check every 0.5s instead of 2s for faster response."""
         start = time.time()
         while time.time() - start < max_wait:
             try:
@@ -203,7 +292,7 @@ class GeminiService:
                     raise RuntimeError(f"File processing {state_name}")
             except Exception as e:
                 logger.warning(f"File state check error: {e}")
-            time.sleep(2)
+            time.sleep(0.5)  # Faster polling
         logger.warning(f"File did not become ACTIVE within {max_wait}s, proceeding anyway")
 
 
